@@ -24,16 +24,13 @@ def parse_entries(entries):
         ext = e.get("extensions", {})
         start = ext.get("VCH.ScheduledStart")
 
-        # convert UTC -> WIB (+7)
         if start:
             dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
             dt = dt.astimezone(timezone(timedelta(hours=7)))
             start = dt.isoformat()
 
-        # ambil JWPlayer id
         media_id = e["id"]
 
-        # bikin src format live.isml/.m3u8
         src = f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8"
 
         result.append({
@@ -53,19 +50,16 @@ def main():
 
     new_data = parse_entries(entries)
 
-    # baca json lama
     if os.path.exists(OUTFILE):
         with open(OUTFILE, "r", encoding="utf-8") as f:
             old_data = json.load(f)
     else:
         old_data = []
 
-    # skip jika tidak ada update
     if old_data == new_data:
         print("⚡ Tidak ada update dari web sumber → skip workflow.")
         sys.exit(0)
 
-    # simpan json terbaru (otomatis hapus jadwal yang dihapus di web sumber)
     with open(OUTFILE, "w", encoding="utf-8") as f:
         json.dump(new_data, f, ensure_ascii=False, indent=2)
 
