@@ -4,34 +4,34 @@ name: Update SV.LEAGUE Schedule
 on:
   schedule:
     - cron: '0 2 * * *'
-  workflow_dispatch:  # Bisa manual juga
+  workflow_dispatch:  # Bisa manual dijalankan
 
 jobs:
   update-schedule:
     runs-on: ubuntu-latest
 
     steps:
-      # Checkout repository
+      # 1️⃣ Checkout repository
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # Setup Python
+      # 2️⃣ Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
 
-      # Install dependencies
+      # 3️⃣ Install dependencies
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           pip install selenium webdriver-manager
 
-      # Run script untuk update JSON
+      # 4️⃣ Jalankan script Python
       - name: Run SV.LEAGUE Schedule Script
-        run: update_schedule.py
+        run: python svleague_schedule_final.py
 
-      # Commit & push JSON hasil update
+      # 5️⃣ Commit & push hasil update
       - name: Commit & Push JSON
         run: |
           git config --local user.name "github-actions[bot]"
