@@ -1,60 +1,64 @@
-import requests
-import json
-import hashlib
-import os
+import requests, json, os, sys
 from datetime import datetime, timezone, timedelta
 
 URL = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/FljcQiNy"
-OUTPUT = "volleyballworld.json"
+OUTFILE = "volleybalworld.json"
 
-def fetch_matches():
-    resp = requests.get(URL)
-    data = resp.json()
+def fetch_schedule():
+    r = requests.get(URL, timeout=20)
+    r.raise_for_status()
+    data = r.json()
+    return data.get("entry", [])
 
-    matches = []
-    for entry in data.get("playlist", []):
-        start_time = entry.get("VCH.ScheduledStart")
-        if not start_time:
-            continue
+def parse_entries(entries):
+    result = []
+    for e in entries:
+        title = e.get("title")
+        poster = None
+        media_group = e.get("media_group", [])
+        if media_group:
+            imgs = media_group[0].get("media_item", [])
+            if imgs:
+                poster = imgs[-1]["src"]
 
-        # ubah ke zona waktu +07:00
-        start_dt = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-        start_local = start_dt.astimezone(timezone(timedelta(hours=7)))
+        ext = e.get("extensions", {})
+        start = ext.get("VCH.ScheduledStart")
+        # convert UTC -> WIB (+7)
+        if start:
+            dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+            dt = dt.astimezone(timezone(timedelta(hours=7)))
+            start = dt.isoformat()
 
-        match = {
-            "title": entry.get("title"),
-            "start": start_local.isoformat(),
-            "src": None,
-            "poster": entry.get("image")
-        }
+        # id JWPlayer untuk bikin link m3u8
+        media_id = e["id"]
+        src = f"https://cdn.jwplayer.com/manifests/{media_id}.m3u8"
 
-        # kalau status LIVE → isi src dengan m3u8
-        if str(entry.get("VCH.EventState")).upper() == "LIVE" and entry.get("file"):
-            match["src"] = entry.get("file")
+        result.append({
+            "title": title,
+            "start": start,
+            "src": src,
+            "poster": poster
+        })
+    return result
 
-        matches.append(match)
+def main():
+    entries = fetch_schedule()
+    new_data = parse_entries(entries)
 
-    return matches
+    if os.path.exists(OUTFILE):
+        with open(OUTFILE, "r", encoding="utf-8") as f:
+            old_data = json.load(f)
+    else:
+        old_data = None
 
-def file_hash(filepath):
-    if not os.path.exists(filepath):
-        return None
-    with open(filepath, "rb") as f:
-        return hashlib.md5(f.read()).hexdigest()
+    if old_data == new_data:
+        print("⚡ Tidak ada update dari web sumber.")
+        sys.exit(0)
 
-def save_json(matches):
-    with open(OUTPUT, "w", encoding="utf-8") as f:
-        json.dump(matches, f, indent=2, ensure_ascii=False)
+    with open(OUTFILE, "w", encoding="utf-8") as f:
+        json.dump(new_data, f, ensure_ascii=False, indent=2)
+
+    print(f"📊 Update tersimpan ({len(new_data)} jadwal).")
 
 if __name__ == "__main__":
-    new_data = fetch_matches()
-    new_hash = hashlib.md5(json.dumps(new_data, sort_keys=True).encode()).hexdigest()
-    old_hash = file_hash(OUTPUT)
-
-    if new_hash != old_hash:
-        save_json(new_data)
-        print("✅ JSON diperbarui, mengikuti web sumber.")
-        exit(0)
-    else:
-        print("⚡ Tidak ada perubahan, skip update.")
-        exit(78)
+    main()
