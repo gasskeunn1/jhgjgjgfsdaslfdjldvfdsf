@@ -45,19 +45,27 @@ def parse_entries(entries):
     return result
 
 def main():
-    entries = fetch_schedule()
+    try:
+        entries = fetch_schedule()
+    except Exception as e:
+        print("❌ Gagal fetch data:", e)
+        sys.exit(1)
+
     new_data = parse_entries(entries)
 
+    # baca json lama
     if os.path.exists(OUTFILE):
         with open(OUTFILE, "r", encoding="utf-8") as f:
             old_data = json.load(f)
     else:
-        old_data = None
+        old_data = []
 
+    # skip jika tidak ada update
     if old_data == new_data:
         print("⚡ Tidak ada update dari web sumber → skip workflow.")
         sys.exit(0)
 
+    # simpan json terbaru (otomatis hapus jadwal yang dihapus di web sumber)
     with open(OUTFILE, "w", encoding="utf-8") as f:
         json.dump(new_data, f, ensure_ascii=False, indent=2)
 
