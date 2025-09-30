@@ -29,7 +29,7 @@ jobs:
 
       # Run script untuk update JSON
       - name: Run SV.LEAGUE Schedule Script
-        run: python svleague_schedule_final.py
+        run: update_schedule.py
 
       # Commit & push JSON hasil update
       - name: Commit & Push JSON
