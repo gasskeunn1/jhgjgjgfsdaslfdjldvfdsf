@@ -2,8 +2,8 @@ name: Update Volleyball Schedule
 
 on:
   schedule:
-    - cron: "0 * * * *"   # jalan tiap jam
-  workflow_dispatch:      # bisa dijalankan manual juga
+    - cron: "0 * * * *" # setiap jam
+  workflow_dispatch:
 
 jobs:
   update:
@@ -19,21 +19,28 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install -r requirements.txt
 
-      - name: Run update script
+      - name: Generate live schedule JSON
         run: python update_schedule.py
 
-      - name: Commit and push if changed
+      - name: Configure Git
         run: |
-          git config --local user.email "actions@github.com"
           git config --local user.name "github-actions"
-          if [[ `git status --porcelain` ]]; then
-            git add schedules/*.json
-            git commit -m "Update schedules JSON"
-            git push
+          git config --local user.email "actions@github.com"
+
+      - name: Check for changes
+        id: git-check
+        run: |
+          git add indoor_live.json beach_live.json
+          if git diff --cached --quiet; then
+            echo "changed=false" >> $GITHUB_OUTPUT
           else
-            echo "⚡ Tidak ada perubahan, skip commit & push."
+            echo "changed=true" >> $GITHUB_OUTPUT
           fi
+
+      - name: Commit & Push changes
+        if: steps.git-check.outputs.changed == 'true'
+        run: |
+          git commit -m "Update live schedule"
+          git push
