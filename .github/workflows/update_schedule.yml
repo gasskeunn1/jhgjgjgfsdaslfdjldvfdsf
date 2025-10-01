@@ -2,15 +2,15 @@ name: Update Volleyball Schedule
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
+    - cron: "*/5 * * * *"  # setiap 5 menit, sesuaikan
+  workflow_dispatch:  # bisa jalan manual
 
 jobs:
   update:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Setup Python
@@ -23,26 +23,22 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Run update script
-        run: python update_schedule.py
-
-      - name: Commit and push if changed
+      - name: Run update_schedule.py
+        id: update
         run: |
-          FILES_CHANGED=""
-          for file in indoor_live.json beach_live.json; do
-            if git diff --quiet "$file"; then
-              echo "$file unchanged."
-            else
-              echo "$file updated."
-              FILES_CHANGED="$FILES_CHANGED $file"
-            fi
-          done
+          python update_schedule.py
 
-          if [ -n "$FILES_CHANGED" ]; then
-            git config --local user.name "github-actions"
-            git config --local user.email "actions@github.com"
-            git add $FILES_CHANGED
-            git commit -m "Update volleyball schedule"
-            git push
-          else
-            echo "No updates detected. Skipping commit."
+      - name: Check for file changes
+        id: files
+        run: |
+          FILES_CHANGED=$(git status --porcelain | awk '{print $2}')
+          echo "FILES_CHANGED=$FILES_CHANGED" >> $GITHUB_ENV
+
+      - name: Commit and push if changes
+        if: env.FILES_CHANGED != ''
+        run: |
+          git config --local user.name "github-actions"
+          git config --local user.email "actions@github.com"
+          git add $FILES_CHANGED
+          git commit -m "Update volleyball schedule"
+          git push
