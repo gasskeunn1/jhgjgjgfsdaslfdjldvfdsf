@@ -2,8 +2,15 @@ import requests
 import json
 from datetime import datetime
 
+HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Accept": "application/json, text/javascript, */*; q=0.01",
+    "Referer": "https://www.svleague.jp/en/",
+    "X-Requested-With": "XMLHttpRequest",
+}
+
 def fetch_schedule(url, gender, tz="+09:00"):
-    res = requests.get(url)
+    res = requests.get(url, headers=HEADERS)
     res.raise_for_status()
     data = res.json()
 
