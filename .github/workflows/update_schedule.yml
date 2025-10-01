@@ -2,8 +2,8 @@ name: Update Volleyball Schedule
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # jalan tiap 10 menit, bisa diubah
-  workflow_dispatch:
+    - cron: "* * * * *" 
+  workflow_dispatch: 
 
 jobs:
   update:
@@ -15,29 +15,19 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.x"
 
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install requests beautifulsoup4
 
-      - name: Run update_schedule.py
-        id: update
-        run: |
-          python update_schedule.py
+      - name: Run updater
+        run: python update_schedule.py
 
-      - name: Commit & Push if changes
+      - name: Commit changes
+        if: success()
         run: |
-          git config --local user.name "github-actions"
           git config --local user.email "actions@github.com"
-          git add indoor_live.json beach_live.json
-          FILES_CHANGED=$(git diff --cached --name-only)
-          if [ -n "$FILES_CHANGED" ]; then
-            git commit -m "Update volleyball schedule"
-            git pull --rebase
-            git push
-            echo "✅ Files pushed: $FILES_CHANGED"
-          else
-            echo "⚡ No changes → skip push."
-          fi
+          git config --local user.name "GitHub Actions"
+          git add svleague_schedule.json
+          git commit -m "Update schedule [skip ci]" || echo "No changes"
+          git push
