@@ -26,6 +26,14 @@ def fetch_schedule(playlist_id):
 def parse_entries(entries):
     result = []
     for e in entries:
+        # 🔎 ambil status
+        ext = e.get("extensions", {})
+        status = (e.get("status") or ext.get("status") or "").lower()
+
+        # filter hanya live & upcoming
+        if status not in ("live", "upcoming", "scheduled"):
+            continue
+
         title = e.get("title")
 
         # Poster
@@ -36,7 +44,6 @@ def parse_entries(entries):
             if imgs:
                 poster = imgs[-1]["src"]
 
-        ext = e.get("extensions", {})
         start = (
             e.get("scheduled_start") or
             ext.get("VCH.ScheduledStart") or
@@ -71,6 +78,7 @@ def parse_entries(entries):
         result.append({
             "title": title,
             "start": start,
+            "status": status,  # 👈 ikut disimpan biar jelas
             "src": src or f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8",
             "poster": poster or f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920"
         })
