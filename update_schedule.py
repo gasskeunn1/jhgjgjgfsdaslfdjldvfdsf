@@ -1,4 +1,4 @@
-import requests, json, os, sys
+import requests, json, os
 from datetime import datetime, timezone, timedelta
 
 BASE = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/"
@@ -15,9 +15,8 @@ def fetch_group_playlists():
     return [e for e in data.get("entry", []) if e.get("type", {}).get("value") == "competition_group"]
 
 def fetch_schedule(playlist_id):
-    url = BASE + playlist_id
     try:
-        data = fetch_json(url)
+        data = fetch_json(BASE + playlist_id)
         return data.get("entry", [])
     except Exception as e:
         print(f"❌ Gagal fetch playlist {playlist_id}: {e}")
@@ -26,17 +25,14 @@ def fetch_schedule(playlist_id):
 def parse_entries(entries):
     result = []
     for e in entries:
-        # 🔎 ambil status
         ext = e.get("extensions", {})
         status = (e.get("status") or ext.get("status") or "").lower()
-
-        # filter hanya live & upcoming
         if status not in ("live", "upcoming", "scheduled"):
             continue
 
         title = e.get("title")
 
-        # Poster
+        # poster
         poster = None
         media_group = e.get("media_group", [])
         if media_group:
@@ -44,6 +40,7 @@ def parse_entries(entries):
             if imgs:
                 poster = imgs[-1]["src"]
 
+        # start
         start = (
             e.get("scheduled_start") or
             ext.get("VCH.ScheduledStart") or
@@ -62,12 +59,12 @@ def parse_entries(entries):
         if isinstance(start, str):
             try:
                 dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                dt = dt.astimezone(timezone(timedelta(hours=7)))
+                dt = dt.astimezone(timezone(timedelta(hours=7)))  # WIB +7
                 start = dt.isoformat()
             except Exception:
                 pass
 
-        # Source stream
+        # src
         src = None
         for link in e.get("links", []):
             if link.get("type") == "application/vnd.apple.mpegurl":
@@ -78,39 +75,23 @@ def parse_entries(entries):
         result.append({
             "title": title,
             "start": start,
-            "status": status,  # 👈 ikut disimpan biar jelas
             "src": src or f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8",
             "poster": poster or f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920"
         })
     return result
 
-def save_json(path, new_data):
-    if os.path.exists(path):
-        with open(path, "r", encoding="utf-8") as f:
-            old_data = json.load(f)
-    else:
-        old_data = []
-
-    if old_data == new_data:
-        print(f"⚡ Tidak ada update untuk {path}")
-        return False
-
+def save_json(path, data):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
-        json.dump(new_data, f, ensure_ascii=False, indent=2)
-
-    print(f"📊 Update tersimpan ke {path} ({len(new_data)} jadwal).")
-    return True
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"📊 Update tersimpan ke {path} ({len(data)} jadwal).")
 
 def main():
-    os.makedirs(OUTDIR, exist_ok=True)
     groups = fetch_group_playlists()
-    if not groups:
-        print("❌ Tidak ada kategori ditemukan.")
-        sys.exit(0)
+    indoor_data, beach_data = [], []
 
-    any_update = False
     for g in groups:
-        code = g.get("extensions", {}).get("competition_group_code") or g.get("title")
+        code = g.get("extensions", {}).get("competition_group_code", "").lower()
         playlists = g.get("extensions", {}).get("hubPlaylists", {})
         ids = [v for v in playlists.values()]
 
@@ -118,14 +99,15 @@ def main():
         for pid in ids:
             all_entries.extend(fetch_schedule(pid))
 
-        new_data = parse_entries(all_entries)
-        outfile = os.path.join(OUTDIR, f"{code}.json")
-        updated = save_json(outfile, new_data)
-        if updated:
-            any_update = True
+        parsed = parse_entries(all_entries)
 
-    if not any_update:
-        sys.exit(0)
+        if "indoor" in code:
+            indoor_data.extend(parsed)
+        elif "beach" in code:
+            beach_data.extend(parsed)
+
+    save_json(os.path.join(OUTDIR, "indoor_live.json"), indoor_data)
+    save_json(os.path.join(OUTDIR, "beach_live.json"), beach_data)
 
 if __name__ == "__main__":
     main()
