@@ -71,4 +71,13 @@ def main():
         sys.exit(1)
 
     all_data = parse_entries(entries)
-    indoor = [x for]()
+
+    # Pisahkan indoor dan beach
+    indoor = [x for x in all_data if "indoor" in x["title"].lower()]
+    beach = [x for x in all_data if "beach" in x["title"].lower()]
+
+    save_json(INDOOR_FILE, indoor)
+    save_json(BEACH_FILE, beach)
+
+if __name__ == "__main__":
+    main()
