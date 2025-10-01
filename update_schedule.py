@@ -2,7 +2,7 @@ import json
 import requests
 
 # URL JSON web source (contoh: endpoint yang explore_vbworld.py gunakan)
-URL = "https://www.volleyballworld.com/api/homepage"  # ganti sesuai endpoint terbaru
+URL = "https://tv.volleyballworld.com/?_data=routes%2F_index"  # ganti sesuai endpoint terbaru
 
 # Fetch data dari web
 response = requests.get(URL)
