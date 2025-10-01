@@ -30,17 +30,19 @@ jobs:
           git config --local user.email "actions@github.com"
 
       - name: Check for changes
-        id: git-check
+        id: check
         run: |
           git add indoor_live.json beach_live.json
           if git diff --cached --quiet; then
             echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No changes detected, skipping commit."
           else
             echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Changes detected, will commit & push."
           fi
 
       - name: Commit & Push changes
-        if: steps.git-check.outputs.changed == 'true'
+        if: steps.check.outputs.changed == 'true'
         run: |
-          git commit -m "Update live schedule"
+          git commit -m "Update live schedule from source"
           git push
