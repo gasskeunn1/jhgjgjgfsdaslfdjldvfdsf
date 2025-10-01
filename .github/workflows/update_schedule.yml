@@ -2,8 +2,8 @@ name: Update Volleyball Schedule
 
 on:
   schedule:
-    - cron: "0 * * * *" # setiap jam
-  workflow_dispatch:
+    - cron: "* * * * *" # jalan tiap menit
+  workflow_dispatch: # bisa jalan manual
 
 jobs:
   update:
@@ -19,9 +19,9 @@ jobs:
           python-version: "3.11"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install requests
 
-      - name: Generate live schedule JSON
+      - name: Run update script
         run: python update_schedule.py
 
       - name: Configure Git
@@ -29,20 +29,21 @@ jobs:
           git config --local user.name "github-actions"
           git config --local user.email "actions@github.com"
 
-      - name: Check for changes
-        id: check
+      - name: Check changes and commit
         run: |
-          git add indoor_live.json beach_live.json
-          if git diff --cached --quiet; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No changes detected, skipping commit."
-          else
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Changes detected, will commit & push."
-          fi
+          FILES_CHANGED=""
+          for file in indoor_live.json beach_live.json; do
+            if git diff --quiet "$file"; then
+              echo "$file unchanged."
+            else
+              echo "$file updated."
+              FILES_CHANGED="$FILES_CHANGED $file"
+            fi
+          done
 
-      - name: Commit & Push changes
-        if: steps.check.outputs.changed == 'true'
-        run: |
-          git commit -m "Update live schedule from source"
-          git push
+          if [ -n "$FILES_CHANGED" ]; then
+            git add $FILES_CHANGED
+            git commit -m "Update volleyball schedule"
+            git push
+          else
+            echo "No updates detected. Skipping commit."
