@@ -1,111 +1,50 @@
-import requests, json, os
+import requests
+import json
+import os
 from datetime import datetime, timezone, timedelta
 
-BASE = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/"
-GROUPS_URL = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/0seCz8gr"
+URL = "https://tv.volleyballworld.com/?_data=routes%2F_index"
 OUTDIR = "schedules"
 
-def fetch_json(url):
-    r = requests.get(url, timeout=20)
-    r.raise_for_status()
-    return r.json()
-
-def fetch_group_playlists():
-    data = fetch_json(GROUPS_URL)
-    return [e for e in data.get("entry", []) if e.get("type", {}).get("value") == "competition_group"]
-
-def fetch_schedule(playlist_id):
-    try:
-        data = fetch_json(BASE + playlist_id)
-        return data.get("entry", [])
-    except Exception as e:
-        print(f"❌ Gagal fetch playlist {playlist_id}: {e}")
-        return []
-
-def parse_entries(entries):
-    result = []
-    for e in entries:
-        title = e.get("title")
-        if not title:
-            continue
-
-        # start time
-        start = e.get("scheduled_start") or e.get("extensions", {}).get("VCH.ScheduledStart") or e.get("extensions", {}).get("match_date")
-        if not start and "actions" in e.get("extensions", {}):
-            for act in e["extensions"]["actions"]:
-                if act.get("type") == "add_to_calendar":
-                    ts = act.get("options", {}).get("startDate")
-                    if ts:
-                        dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
-                        start = dt.isoformat()
-                        break
-        if isinstance(start, str):
-            try:
-                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                dt = dt.astimezone(timezone(timedelta(hours=7)))
-                start = dt.isoformat()
-            except Exception:
-                start = None
-
-        # poster
-        poster = None
-        media_group = e.get("media_group", [])
-        if media_group:
-            imgs = media_group[0].get("media_item", [])
-            if imgs:
-                poster = imgs[-1]["src"]
-
-        # src
-        src = None
-        for link in e.get("links", []):
-            if link.get("type") == "application/vnd.apple.mpegurl":
-                src = link.get("href")
-                break
-
-        media_id = e.get("id")
-        result.append({
-            "title": title,
-            "start": start,
-            "src": src or f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8",
-            "poster": poster or f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920"
-        })
-    return result
+def fetch_data():
+    response = requests.get(URL, timeout=20)
+    response.raise_for_status()
+    return response.json()
 
 def save_json(path, data):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"📊 Update tersimpan ke {path} ({len(data)} jadwal).")
+    print(f"📊 Data tersimpan ke {path} ({len(data)} item)")
+
+def parse_match_data(data):
+    indoor, beach = [], []
+    for match in data.get("matches", []):
+        title = match.get("title")
+        start = match.get("startTime")
+        src = match.get("streamUrl")
+        poster = match.get("posterUrl")
+        comp_type = match.get("competitionType", "").lower()
+
+        match_info = {
+            "title": title,
+            "start": start,
+            "src": src,
+            "poster": poster
+        }
+
+        if "beach" in comp_type:
+            beach.append(match_info)
+        else:
+            indoor.append(match_info)
+
+    return indoor, beach
 
 def main():
-    groups = fetch_group_playlists()
-    indoor_data, beach_data = [], []
-
-    for g in groups:
-        code = (g.get("extensions", {}).get("competition_group_code") or "").lower()
-        title_group = (g.get("title") or "").lower()
-
-        # Ambil semua playlist, jika hubPlaylists tidak ada, ambil id grup sendiri
-        playlists = g.get("extensions", {}).get("hubPlaylists", {})
-        if playlists:
-            ids = [v for v in playlists.values()]
-        else:
-            ids = [g.get("id")]
-
-        all_entries = []
-        for pid in ids:
-            all_entries.extend(fetch_schedule(pid))
-
-        parsed = parse_entries(all_entries)
-
-        # Tentukan Indoor / Beach
-        if "beach" in code or "beach" in title_group:
-            beach_data.extend(parsed)
-        else:
-            indoor_data.extend(parsed)
-
-    save_json(os.path.join(OUTDIR, "indoor_live.json"), indoor_data)
-    save_json(os.path.join(OUTDIR, "beach_live.json"), beach_data)
+    data = fetch_data()
+    indoor, beach = parse_match_data(data)
+    save_json(f"{OUTDIR}/indoor_live.json", indoor)
+    save_json(f"{OUTDIR}/beach_live.json", beach)
 
 if __name__ == "__main__":
     main()
