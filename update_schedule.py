@@ -1,59 +1,34 @@
 import requests, json, os, sys
 from datetime import datetime, timezone, timedelta
 
+BASE = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/"
+GROUPS_URL = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/0seCz8gr"
 OUTDIR = "schedules"
-INDOOR_FILE = os.path.join(OUTDIR, "indoor.json")
-BEACH_FILE = os.path.join(OUTDIR, "beach.json")
 
-URL_INDOOR = "https://tv.volleyballworld.com/schedule"
-URL_BEACH = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/FljcQiNy"
+def fetch_json(url):
+    r = requests.get(url, timeout=20)
+    r.raise_for_status()
+    return r.json()
 
+def fetch_group_playlists():
+    data = fetch_json(GROUPS_URL)
+    return [e for e in data.get("entry", []) if e.get("type", {}).get("value") == "competition_group"]
 
-def convert_time(ts: str | None):
-    if not ts:
-        return None
+def fetch_schedule(playlist_id):
+    url = BASE + playlist_id
     try:
-        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
-        dt = dt.astimezone(timezone(timedelta(hours=7)))
-        return dt.isoformat()
-    except Exception:
-        return ts
-
-
-def fetch_indoor():
-    try:
-        r = requests.get(URL_INDOOR, timeout=20)
-        r.raise_for_status()
-        data = r.json()
+        data = fetch_json(url)
+        return data.get("entry", [])
     except Exception as e:
-        print("❌ Gagal fetch indoor:", e)
+        print(f"❌ Gagal fetch playlist {playlist_id}: {e}")
         return []
 
+def parse_entries(entries):
     result = []
-    events = data.get("events", [])
-    for e in events:
-        result.append({
-            "title": e.get("title"),
-            "start": convert_time(e.get("startDate")),
-            "poster": e.get("image", {}).get("src"),
-            "src": None,  # indoor tidak ada langsung .m3u8
-            "category": e.get("category", {}).get("name")
-        })
-    return result
-
-
-def fetch_beach():
-    try:
-        r = requests.get(URL_BEACH, timeout=20)
-        r.raise_for_status()
-        data = r.json()
-    except Exception as e:
-        print("❌ Gagal fetch beach:", e)
-        return []
-
-    result = []
-    for e in data.get("entry", []):
+    for e in entries:
         title = e.get("title")
+
+        # Poster
         poster = None
         media_group = e.get("media_group", [])
         if media_group:
@@ -63,9 +38,9 @@ def fetch_beach():
 
         ext = e.get("extensions", {})
         start = (
-            e.get("scheduled_start")
-            or ext.get("VCH.ScheduledStart")
-            or ext.get("match_date")
+            e.get("scheduled_start") or
+            ext.get("VCH.ScheduledStart") or
+            ext.get("match_date")
         )
 
         if not start and "actions" in ext:
@@ -77,7 +52,15 @@ def fetch_beach():
                         start = dt.isoformat()
                         break
 
-        start = convert_time(start)
+        if isinstance(start, str):
+            try:
+                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                dt = dt.astimezone(timezone(timedelta(hours=7)))
+                start = dt.isoformat()
+            except Exception:
+                pass
+
+        # Source stream
         src = None
         for link in e.get("links", []):
             if link.get("type") == "application/vnd.apple.mpegurl":
@@ -85,7 +68,6 @@ def fetch_beach():
                 break
 
         media_id = e.get("id")
-
         result.append({
             "title": title,
             "start": start,
@@ -94,8 +76,7 @@ def fetch_beach():
         })
     return result
 
-
-def save_if_changed(path, new_data):
+def save_json(path, new_data):
     if os.path.exists(path):
         with open(path, "r", encoding="utf-8") as f:
             old_data = json.load(f)
@@ -112,22 +93,31 @@ def save_if_changed(path, new_data):
     print(f"📊 Update tersimpan ke {path} ({len(new_data)} jadwal).")
     return True
 
-
 def main():
     os.makedirs(OUTDIR, exist_ok=True)
-
-    changed = False
-    indoor_data = fetch_indoor()
-    beach_data = fetch_beach()
-
-    if save_if_changed(INDOOR_FILE, indoor_data):
-        changed = True
-    if save_if_changed(BEACH_FILE, beach_data):
-        changed = True
-
-    if not changed:
+    groups = fetch_group_playlists()
+    if not groups:
+        print("❌ Tidak ada kategori ditemukan.")
         sys.exit(0)
 
+    any_update = False
+    for g in groups:
+        code = g.get("extensions", {}).get("competition_group_code") or g.get("title")
+        playlists = g.get("extensions", {}).get("hubPlaylists", {})
+        ids = [v for v in playlists.values()]
+
+        all_entries = []
+        for pid in ids:
+            all_entries.extend(fetch_schedule(pid))
+
+        new_data = parse_entries(all_entries)
+        outfile = os.path.join(OUTDIR, f"{code}.json")
+        updated = save_json(outfile, new_data)
+        if updated:
+            any_update = True
+
+    if not any_update:
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
