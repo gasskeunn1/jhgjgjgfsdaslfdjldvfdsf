@@ -1,41 +1,33 @@
-name: Update SV.LEAGUE Schedule
+name: Update Volleyball Schedule
 
 on:
   schedule:
-    # jalan tiap hari jam 02:00 UTC (09:00 JST)
-    - cron: '0 2 * * *'
-  workflow_dispatch: # bisa manual dijalankan
+    - cron: "0 * * * *" # jalan tiap jam
+  workflow_dispatch: # bisa manual jalanin
 
 jobs:
-  update-svleague:
+  update:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Checkout repo
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      # 2. Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.x"
 
-      # 3. Install dependencies (hanya requests)
       - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+        run: pip install requests beautifulsoup4
 
-      # 4. Run script ambil jadwal
-      - name: Run SV.LEAGUE Schedule Script
-        run: python svleague_schedule_final.py
+      - name: Run updater
+        run: python update_schedule.py
 
-      # 5. Commit & push hasil update JSON
-      - name: Commit & Push JSON
+      - name: Commit changes
+        if: success()
         run: |
-          git config --local user.name "github-actions[bot]"
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git add svleague_schedule.json
-          git diff --cached --quiet || git commit -m "Update SV.LEAGUE schedule [skip ci]"
+          git config --local user.email "actions@github.com"
+          git config --local user.name "GitHub Actions"
+          git add schedules/*.json
+          git commit -m "Update schedule [skip ci]" || echo "No changes"
           git push
