@@ -1,84 +1,100 @@
-import requests, json, os, sys
+import requests
+import json
+import os
+import sys
 from datetime import datetime, timezone, timedelta
 
 URL = "https://tv.volleyballworld.com/?_data=routes%2F_index"
 INDOOR_FILE = "indoor_live.json"
 BEACH_FILE = "beach_live.json"
 
-def fetch_schedule():
+# zona waktu WIB
+TZ = timezone(timedelta(hours=7))
+
+def fetch_data():
     try:
         r = requests.get(URL, timeout=20)
         r.raise_for_status()
-        data = r.json()
-        # Data biasanya ada di pageProps.liveEvents atau pageProps.initialState.matches
-        events = data.get("pageProps", {}).get("liveEvents", [])
-        if not events:
-            events = data.get("pageProps", {}).get("initialState", {}).get("matches", [])
-        return events
+        return r.json()
     except Exception as e:
         print("❌ Gagal fetch data:", e)
         sys.exit(1)
 
-def parse_entries(entries, discipline_filter):
-    result = []
-    for e in entries:
-        # Filter berdasarkan discipline
-        discipline = e.get("discipline")
-        if discipline_filter == "indoor" and discipline != "INDOOR":
-            continue
-        if discipline_filter == "beach" and discipline != "BEACH":
-            continue
+def parse_matches(data):
+    indoor = []
+    beach = []
 
-        title = e.get("homeTeam", {}).get("name") + " - " + e.get("awayTeam", {}).get("name") \
-                if e.get("homeTeam") and e.get("awayTeam") else e.get("title", "Match")
-
-        start = e.get("scheduledStart") or e.get("matchDate")
-        if start:
+    # asumsi data match ada di data["matches"]
+    matches = data.get("matches", [])
+    for m in matches:
+        # ambil info dasar
+        title = m.get("title") or m.get("match_title")
+        start_ts = m.get("start") or m.get("scheduled_start")
+        start = None
+        if start_ts:
             try:
-                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                dt = dt.astimezone(timezone(timedelta(hours=7)))
-                start = dt.isoformat()
-            except Exception:
-                pass
+                dt = datetime.fromtimestamp(start_ts / 1000, tz=timezone.utc)
+                start = dt.astimezone(TZ).isoformat()
+            except:
+                start = None
 
-        src = e.get("streamUrl")  # kadang ada, kadang tidak
-        media_id = e.get("id")
-        if not src and media_id:
+        # ambil poster
+        poster = m.get("poster") or m.get("media_url")
+        # ambil streaming link jika ada
+        src = None
+        links = m.get("links") or []
+        for l in links:
+            if l.get("type") == "application/vnd.apple.mpegurl":
+                src = l.get("href")
+                break
+
+        media_id = m.get("id")
+        if not src:
             src = f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8"
+        if not poster:
+            poster = f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920"
 
-        poster = e.get("poster") or f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920" if media_id else None
-
-        result.append({
+        entry = {
             "title": title,
             "start": start,
             "src": src,
             "poster": poster
-        })
-    return result
+        }
 
-def save_if_changed(data, outfile):
+        discipline = m.get("discipline") or ""
+        if "Beach" in discipline:
+            beach.append(entry)
+        else:
+            indoor.append(entry)
+
+    return indoor, beach
+
+def save_if_changed(outfile, new_data):
     if os.path.exists(outfile):
         with open(outfile, "r", encoding="utf-8") as f:
             old_data = json.load(f)
     else:
         old_data = []
 
-    if old_data == data:
+    if old_data == new_data:
         print(f"⚡ Tidak ada update → skip {outfile}.")
         return False
 
     with open(outfile, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"📊 Update tersimpan di {outfile} ({len(data)} jadwal).")
+        json.dump(new_data, f, ensure_ascii=False, indent=2)
+
+    print(f"📊 Update tersimpan di {outfile} ({len(new_data)} jadwal).")
     return True
 
 def main():
-    entries = fetch_schedule()
-    indoor = parse_entries(entries, "indoor")
-    beach = parse_entries(entries, "beach")
+    data = fetch_data()
+    indoor, beach = parse_matches(data)
+    updated = False
+    updated |= save_if_changed(INDOOR_FILE, indoor)
+    updated |= save_if_changed(BEACH_FILE, beach)
 
-    save_if_changed(indoor, INDOOR_FILE)
-    save_if_changed(beach, BEACH_FILE)
+    if not updated:
+        sys.exit(0)
 
 if __name__ == "__main__":
     main()
