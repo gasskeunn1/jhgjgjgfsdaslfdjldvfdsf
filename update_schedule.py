@@ -1,9 +1,8 @@
 import requests, json, os, sys
 from datetime import datetime, timezone, timedelta
 
-URL = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/8PkxmOMj"
-INDOOR_FILE = "indoor_live.json"
-BEACH_FILE = "beach_live.json"
+URL = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/cUqft8Cd"
+OUTFILE = "svleague_schedule.json"
 
 def fetch_schedule():
     r = requests.get(URL, timeout=20)
@@ -12,50 +11,56 @@ def fetch_schedule():
     return data.get("entry", [])
 
 def parse_entries(entries):
-    indoor = []
-    beach = []
-
+    result = []
     for e in entries:
         title = e.get("title")
-        comp_type = e.get("extensions", {}).get("tags", "").lower()  # gunakan tags untuk menentukan jenis
-        media_group = e.get("media_group", [])
+
         poster = None
+        media_group = e.get("media_group", [])
         if media_group:
             imgs = media_group[0].get("media_item", [])
             if imgs:
                 poster = imgs[-1]["src"]
 
-        playlists = e.get("hubPlaylists", {})
-        playlist_links = [f"https://zapp-5434-volleyball-tv.web.app/jw/playlists/{pid}" for pid in playlists.values()]
+        ext = e.get("extensions", {})
+        start = (
+            e.get("scheduled_start") or
+            ext.get("VCH.ScheduledStart") or
+            ext.get("match_date")
+        )
 
-        entry_data = {
+        if not start and "actions" in ext:
+            for act in ext.get("actions", []):
+                if act.get("type") == "add_to_calendar":
+                    ts = act.get("options", {}).get("startDate")
+                    if ts:
+                        dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+                        start = dt.isoformat()
+                        break
+
+        if isinstance(start, str):
+            try:
+                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                dt = dt.astimezone(timezone(timedelta(hours=7)))
+                start = dt.isoformat()
+            except Exception:
+                pass
+
+        src = None
+        for link in e.get("links", []):
+            if link.get("type") == "application/vnd.apple.mpegurl":
+                src = link.get("href")
+                break
+
+        media_id = e.get("id")
+
+        result.append({
             "title": title,
-            "poster": poster,
-            "playlists": playlist_links
-        }
-
-        if "beach" in comp_type:
-            beach.append(entry_data)
-        else:
-            indoor.append(entry_data)
-
-    return indoor, beach
-
-def save_file(filename, data):
-    if os.path.exists(filename):
-        with open(filename, "r", encoding="utf-8") as f:
-            old_data = json.load(f)
-    else:
-        old_data = []
-
-    if old_data == data:
-        print(f"⚡ Tidak ada update → skip {filename}.")
-        return False
-
-    with open(filename, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-    print(f"📊 Update tersimpan di {filename} ({len(data)} jadwal).")
-    return True
+            "start": start,
+            "src": src or f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8",
+            "poster": poster or f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920"
+        })
+    return result
 
 def main():
     try:
@@ -64,15 +69,22 @@ def main():
         print("❌ Gagal fetch data:", e)
         sys.exit(1)
 
-    indoor, beach = parse_entries(entries)
+    new_data = parse_entries(entries)
 
-    updated_indoor = save_file(INDOOR_FILE, indoor)
-    updated_beach = save_file(BEACH_FILE, beach)
-
-    if updated_indoor or updated_beach:
-        print("✅ Ada update → siap untuk push.")
+    if os.path.exists(OUTFILE):
+        with open(OUTFILE, "r", encoding="utf-8") as f:
+            old_data = json.load(f)
     else:
-        print("⚡ Tidak ada update → skip push.")
+        old_data = []
+
+    if old_data == new_data:
+        print("⚡ Tidak ada update dari web sumber → skip workflow.")
+        sys.exit(0)
+
+    with open(OUTFILE, "w", encoding="utf-8") as f:
+        json.dump(new_data, f, ensure_ascii=False, indent=2)
+
+    print(f"📊 Update tersimpan ({len(new_data)} jadwal).")
 
 if __name__ == "__main__":
     main()
