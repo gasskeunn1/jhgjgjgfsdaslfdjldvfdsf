@@ -91,7 +91,8 @@ def main():
     indoor_data, beach_data = [], []
 
     for g in groups:
-        code = g.get("extensions", {}).get("competition_group_code", "").lower()
+        code = (g.get("extensions", {}).get("competition_group_code") or "").lower()
+        title_group = (g.get("title") or "").lower()
         playlists = g.get("extensions", {}).get("hubPlaylists", {})
         ids = [v for v in playlists.values()]
 
@@ -101,10 +102,11 @@ def main():
 
         parsed = parse_entries(all_entries)
 
-        if "indoor" in code:
-            indoor_data.extend(parsed)
-        elif "beach" in code:
+        # Tentukan Indoor / Beach berdasarkan code atau title
+        if "beach" in code or "beach" in title_group:
             beach_data.extend(parsed)
+        else:
+            indoor_data.extend(parsed)
 
     save_json(os.path.join(OUTDIR, "indoor_live.json"), indoor_data)
     save_json(os.path.join(OUTDIR, "beach_live.json"), beach_data)
