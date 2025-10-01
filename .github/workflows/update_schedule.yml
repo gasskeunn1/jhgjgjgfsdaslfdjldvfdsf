@@ -2,13 +2,12 @@ name: Update Volleyball Schedule
 
 on:
   schedule:
-    - cron: "*/5 * * * *" # cek tiap 5 menit (ubah sesuai kebutuhan)
-  workflow_dispatch: # bisa dijalankan manual
+    - cron: '*/10 * * * *'  # jalan tiap 10 menit, bisa diubah
+  workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -21,23 +20,24 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install requests beautifulsoup4
+          pip install requests
 
-      - name: Run schedule update
+      - name: Run update_schedule.py
+        id: update
         run: |
           python update_schedule.py
 
-      - name: Check for changes
-        id: changes
+      - name: Commit & Push if changes
         run: |
-          FILES_CHANGED=$(git status --porcelain | awk '{print $2}')
-          echo "files=$FILES_CHANGED" >> $GITHUB_OUTPUT
-
-      - name: Commit & Push changes
-        if: ${{ steps.changes.outputs.files != '' }}
-        run: |
-          git config --local user.email "actions@github.com"
           git config --local user.name "github-actions"
-          git add .
-          git commit -m "Update schedule [ci skip]"
-          git push
+          git config --local user.email "actions@github.com"
+          git add indoor_live.json beach_live.json
+          FILES_CHANGED=$(git diff --cached --name-only)
+          if [ -n "$FILES_CHANGED" ]; then
+            git commit -m "Update volleyball schedule"
+            git pull --rebase
+            git push
+            echo "✅ Files pushed: $FILES_CHANGED"
+          else
+            echo "⚡ No changes → skip push."
+          fi
