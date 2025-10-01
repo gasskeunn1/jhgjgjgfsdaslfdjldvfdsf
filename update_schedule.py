@@ -1,7 +1,7 @@
 import requests, json, os, sys
 from datetime import datetime, timezone, timedelta
 
-URL = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/FljcQiNy"
+URL = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/8PkxmOMj"
 INDOOR_FILE = "indoor_live.json"
 BEACH_FILE = "beach_live.json"
 
@@ -12,56 +12,50 @@ def fetch_schedule():
     return data.get("entry", [])
 
 def parse_entries(entries):
-    result = []
+    indoor = []
+    beach = []
+
     for e in entries:
-        title = e.get("title", "")
-        media_id = e.get("id")
-
-        # ambil link HLS
-        src = None
-        for link in e.get("links", []):
-            if link.get("type") == "application/vnd.apple.mpegurl":
-                src = link.get("href")
-                break
-
-        # ambil poster
-        poster = None
+        title = e.get("title")
+        comp_type = e.get("extensions", {}).get("tags", "").lower()  # gunakan tags untuk menentukan jenis
         media_group = e.get("media_group", [])
+        poster = None
         if media_group:
             imgs = media_group[0].get("media_item", [])
             if imgs:
                 poster = imgs[-1]["src"]
 
-        # ambil waktu mulai
-        start = e.get("scheduled_start")
-        if isinstance(start, str):
-            try:
-                dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                dt = dt.astimezone(timezone(timedelta(hours=7)))
-                start = dt.isoformat()
-            except:
-                pass
+        playlists = e.get("hubPlaylists", {})
+        playlist_links = [f"https://zapp-5434-volleyball-tv.web.app/jw/playlists/{pid}" for pid in playlists.values()]
 
-        result.append({
+        entry_data = {
             "title": title,
-            "start": start,
-            "src": src or f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8",
-            "poster": poster or f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920"
-        })
-    return result
+            "poster": poster,
+            "playlists": playlist_links
+        }
 
-def save_json(filename, data):
+        if "beach" in comp_type:
+            beach.append(entry_data)
+        else:
+            indoor.append(entry_data)
+
+    return indoor, beach
+
+def save_file(filename, data):
     if os.path.exists(filename):
         with open(filename, "r", encoding="utf-8") as f:
             old_data = json.load(f)
     else:
         old_data = []
+
     if old_data == data:
         print(f"⚡ Tidak ada update → skip {filename}.")
-        return
+        return False
+
     with open(filename, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"📊 Update tersimpan di {filename} ({len(data)} jadwal).")
+    return True
 
 def main():
     try:
@@ -70,14 +64,15 @@ def main():
         print("❌ Gagal fetch data:", e)
         sys.exit(1)
 
-    all_data = parse_entries(entries)
+    indoor, beach = parse_entries(entries)
 
-    # Pisahkan indoor dan beach
-    indoor = [x for x in all_data if "indoor" in x["title"].lower()]
-    beach = [x for x in all_data if "beach" in x["title"].lower()]
+    updated_indoor = save_file(INDOOR_FILE, indoor)
+    updated_beach = save_file(BEACH_FILE, beach)
 
-    save_json(INDOOR_FILE, indoor)
-    save_json(BEACH_FILE, beach)
+    if updated_indoor or updated_beach:
+        print("✅ Ada update → siap untuk push.")
+    else:
+        print("⚡ Tidak ada update → skip push.")
 
 if __name__ == "__main__":
     main()
