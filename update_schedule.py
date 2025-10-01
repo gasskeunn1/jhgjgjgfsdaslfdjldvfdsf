@@ -1,95 +1,133 @@
 import requests, json, os, sys
 from datetime import datetime, timezone, timedelta
-from bs4 import BeautifulSoup
 
-URL = "https://tv.volleyballworld.com/schedule"
 OUTDIR = "schedules"
+INDOOR_FILE = os.path.join(OUTDIR, "indoor.json")
+BEACH_FILE = os.path.join(OUTDIR, "beach.json")
 
-def fetch_schedule():
-    r = requests.get(URL, timeout=30)
-    r.raise_for_status()
-    return r.text
+URL_INDOOR = "https://tv.volleyballworld.com/schedule"
+URL_BEACH = "https://zapp-5434-volleyball-tv.web.app/jw/playlists/FljcQiNy"
 
-def parse_schedule(html):
-    soup = BeautifulSoup(html, "html.parser")
-    categories = {}
 
-    # ambil blok kategori
-    for block in soup.select("section[class*='Category']"):
-        category = block.find("h2")
-        if not category:
-            continue
-        cat_name = category.get_text(strip=True)
-        cat_key = cat_name.lower().replace(" ", "_")
+def convert_time(ts: str | None):
+    if not ts:
+        return None
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        dt = dt.astimezone(timezone(timedelta(hours=7)))
+        return dt.isoformat()
+    except Exception:
+        return ts
 
-        matches = []
-        for match in block.select("article"):
-            title = match.get_text(" ", strip=True)
 
-            # ambil waktu
-            time_tag = match.find("time")
-            start = None
-            if time_tag and time_tag.has_attr("datetime"):
-                try:
-                    dt = datetime.fromisoformat(time_tag["datetime"].replace("Z", "+00:00"))
-                    dt = dt.astimezone(timezone(timedelta(hours=7)))
-                    start = dt.isoformat()
-                except Exception:
-                    start = time_tag["datetime"]
+def fetch_indoor():
+    try:
+        r = requests.get(URL_INDOOR, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print("❌ Gagal fetch indoor:", e)
+        return []
 
-            # poster (jika ada)
-            img = match.find("img")
-            poster = img["src"] if img and img.has_attr("src") else None
+    result = []
+    events = data.get("events", [])
+    for e in events:
+        result.append({
+            "title": e.get("title"),
+            "start": convert_time(e.get("startDate")),
+            "poster": e.get("image", {}).get("src"),
+            "src": None,  # indoor tidak ada langsung .m3u8
+            "category": e.get("category", {}).get("name")
+        })
+    return result
 
-            matches.append({
-                "title": title,
-                "start": start,
-                "poster": poster
-            })
 
-        categories[cat_key] = {
-            "category": cat_name,
-            "matches": matches
-        }
+def fetch_beach():
+    try:
+        r = requests.get(URL_BEACH, timeout=20)
+        r.raise_for_status()
+        data = r.json()
+    except Exception as e:
+        print("❌ Gagal fetch beach:", e)
+        return []
 
-    return categories
+    result = []
+    for e in data.get("entry", []):
+        title = e.get("title")
+        poster = None
+        media_group = e.get("media_group", [])
+        if media_group:
+            imgs = media_group[0].get("media_item", [])
+            if imgs:
+                poster = imgs[-1]["src"]
 
-def save_categories(categories):
-    if not os.path.exists(OUTDIR):
-        os.makedirs(OUTDIR)
+        ext = e.get("extensions", {})
+        start = (
+            e.get("scheduled_start")
+            or ext.get("VCH.ScheduledStart")
+            or ext.get("match_date")
+        )
 
-    # hapus file lama yang kategorinya sudah tidak ada
-    old_files = {f for f in os.listdir(OUTDIR) if f.endswith(".json")}
-    new_files = set()
+        if not start and "actions" in ext:
+            for act in ext.get("actions", []):
+                if act.get("type") == "add_to_calendar":
+                    ts = act.get("options", {}).get("startDate")
+                    if ts:
+                        dt = datetime.fromtimestamp(ts / 1000, tz=timezone.utc)
+                        start = dt.isoformat()
+                        break
 
-    for cat_key, data in categories.items():
-        outfile = f"{cat_key}.json"
-        new_files.add(outfile)
-        path = os.path.join(OUTDIR, outfile)
+        start = convert_time(start)
+        src = None
+        for link in e.get("links", []):
+            if link.get("type") == "application/vnd.apple.mpegurl":
+                src = link.get("href")
+                break
 
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        media_id = e.get("id")
 
-        print(f"📁 {outfile} tersimpan ({len(data['matches'])} pertandingan).")
+        result.append({
+            "title": title,
+            "start": start,
+            "src": src or f"https://livecdn.euw1-0005.jwplive.com/live/sites/fM9jRrkn/media/{media_id}/live.isml/.m3u8",
+            "poster": poster or f"https://cdn.jwplayer.com/v2/media/{media_id}/poster.jpg?width=1920"
+        })
+    return result
 
-    # hapus file lama yang sudah tidak ada di kategori baru
-    for old in old_files - new_files:
-        os.remove(os.path.join(OUTDIR, old))
-        print(f"🗑️ {old} dihapus (tidak ada di web sumber).")
+
+def save_if_changed(path, new_data):
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            old_data = json.load(f)
+    else:
+        old_data = []
+
+    if old_data == new_data:
+        print(f"⚡ Tidak ada update untuk {path}")
+        return False
+
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(new_data, f, ensure_ascii=False, indent=2)
+
+    print(f"📊 Update tersimpan ke {path} ({len(new_data)} jadwal).")
+    return True
+
 
 def main():
-    try:
-        html = fetch_schedule()
-    except Exception as e:
-        print("❌ Gagal fetch data:", e)
-        sys.exit(1)
+    os.makedirs(OUTDIR, exist_ok=True)
 
-    categories = parse_schedule(html)
-    if not categories:
-        print("⚡ Tidak ada kategori ditemukan di web sumber.")
+    changed = False
+    indoor_data = fetch_indoor()
+    beach_data = fetch_beach()
+
+    if save_if_changed(INDOOR_FILE, indoor_data):
+        changed = True
+    if save_if_changed(BEACH_FILE, beach_data):
+        changed = True
+
+    if not changed:
         sys.exit(0)
 
-    save_categories(categories)
 
 if __name__ == "__main__":
     main()
